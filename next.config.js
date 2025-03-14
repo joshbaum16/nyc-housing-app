@@ -9,6 +9,9 @@ const nextConfig = {
       },
     ],
   },
+  env: {
+    STREETEASY_API_KEY: process.env.STREETEASY_API_KEY,
+  },
 }
 
 module.exports = nextConfig 
