@@ -1,3 +1,4 @@
 node_modules
 .env.local
 nyc-housing-453603-d925ac2bcb13.json
+.next/
