@@ -1,7 +1,0 @@
-{
-  "/not-found": "app/not-found.js",
-  "/page": "app/page.js",
-  "/api/process-search/route": "app/api/process-search/route.js",
-  "/api/listings/route": "app/api/listings/route.js",
-  "/api/analyze-image/route": "app/api/analyze-image/route.js"
-}
