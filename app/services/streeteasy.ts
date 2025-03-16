@@ -8,13 +8,13 @@ import {
   StreetEasySearchParams
 } from '../types/listings';
 
-if (!process.env.STREETEASY_API_KEY) {
+if (!process.env.NEXT_PUBLIC_STREETEASY_API_KEY) {
   throw new Error('Missing STREETEASY_API_KEY environment variable');
 }
 
 const STREETEASY_API_CONFIG = {
   host: 'streeteasy-api.p.rapidapi.com',
-  key: process.env.STREETEASY_API_KEY,
+  key: process.env.NEXT_PUBLIC_STREETEASY_API_KEY,
   baseUrl: 'https://streeteasy-api.p.rapidapi.com'
 };
 
