@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { searchListings } from '../services/streeteasy';
+import { sortListingsByRelevance } from '../services/embeddings';
 import { Listing } from '../types/listings';
 
 interface Message {
@@ -10,11 +11,14 @@ interface Message {
   isSearching?: boolean;
 }
 
-interface NaturalSearchProps {
+interface Props {
   onResults: (listings: Listing[]) => void;
+  onQueryDescription?: (description: string) => void;
 }
 
-export default function NaturalSearch({ onResults }: NaturalSearchProps) {
+type SortOption = 'none' | 'price-asc' | 'price-desc' | 'relevance';
+
+export default function NaturalSearch({ onResults, onQueryDescription }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -23,145 +27,101 @@ export default function NaturalSearch({ onResults }: NaturalSearchProps) {
   ]);
   const [input, setInput] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [currentQueryDescription, setCurrentQueryDescription] = useState<string>();
+  const [searchCriteria, setSearchCriteria] = useState({
+    minBedrooms: '0',
+    maxBedrooms: '10',
+    minBaths: '1',
+    minPrice: '0',
+    maxPrice: '10000',
+    neighborhoods: [],
+    amenities: [],
+    petFriendly: false,
+    noFee: false
+  });
 
-  const handleSearch = async (userMessage: string) => {
+  const handleSearch = async () => {
+    if (!input.trim()) return;
+
+    setMessages([...messages, { role: 'user', content: input }]);
+    setInput('');
+
     try {
-      setIsSearching(true);
-      
-      // Add user message to chat
-      setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-
-      // Add typing indicator
-      setMessages(prev => [...prev, { role: 'assistant', content: '...', isSearching: true }]);
-
       const response = await fetch('/api/process-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          query: userMessage,
-          conversationHistory: messages.map(m => ({ role: m.role, content: m.content }))
+        body: JSON.stringify({
+          query: input,
+          conversationHistory: messages.map(m => ({ role: m.role, content: m.content })),
+          criteria: searchCriteria
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to process search query: ${response.statusText}`);
+        throw new Error('Search failed');
       }
 
       const data = await response.json();
       
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      
-      // Remove typing indicator
-      setMessages(prev => prev.filter(m => !m.isSearching));
-
       if (data.needsMoreInfo) {
-        // Bot needs more information, add follow-up question
-        setMessages(prev => [...prev, { role: 'assistant', content: data.followUpQuestion }]);
-        setIsSearching(false);
+        setMessages([
+          ...messages,
+          { role: 'user', content: input },
+          { role: 'assistant', content: data.followUpQuestion }
+        ]);
         return;
       }
 
-      const searchCriteria = {
-        minBedrooms: data.minBeds || '0',
-        maxBedrooms: data.maxBeds || '10',
-        minBaths: data.minBaths || '1',
-        minPrice: data.minPrice?.toString() || '0',
-        maxPrice: data.maxPrice?.toString() || '10000',
-        neighborhoods: data.areas ? data.areas.split(',') : [],
-        amenities: data.additionalPreferences.mustHave || [],
-        petFriendly: data.additionalPreferences.mustHave.includes('pet friendly'),
+      // Convert the processed preferences back to search criteria
+      const updatedCriteria = {
+        ...searchCriteria,
+        minBedrooms: data.minBeds || searchCriteria.minBedrooms,
+        maxBedrooms: data.maxBeds || searchCriteria.maxBedrooms,
+        minBaths: data.minBaths || searchCriteria.minBaths,
+        minPrice: data.minPrice || searchCriteria.minPrice,
+        maxPrice: data.maxPrice || searchCriteria.maxPrice,
+        neighborhoods: data.areas ? data.areas.split(',') : searchCriteria.neighborhoods,
+        amenities: data.additionalPreferences?.mustHave || searchCriteria.amenities,
+        petFriendly: data.additionalPreferences?.mustHave?.includes('pet friendly') || searchCriteria.petFriendly,
         noFee: data.noFee === 'true'
       };
+      setSearchCriteria(updatedCriteria);
 
-      // Add searching message with specific areas
-      const searchingMessage = `I'm searching for listings in ${
-        searchCriteria.neighborhoods.length > 0 
-          ? searchCriteria.neighborhoods
-              .map((n: string) => n.split('-')
-                .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-                .join(' '))
-              .join(', ')
-          : 'all areas'
-      } within your criteria...`;
-      
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: searchingMessage
-      }]);
-
-      const results = await searchListings(searchCriteria);
-
-      // Filter results based on additional preferences
-      const filteredListings = results.listings.filter(listing => {
-        if (!listing.details?.imageAnalysis) {
-          return true;
-        }
-
-        const { additionalPreferences } = data;
-        const imageAnalyses = listing.details.imageAnalysis;
-        
-        // Calculate aggregated scores
-        const scores = Object.values(imageAnalyses).reduce((acc, analysis) => {
-          // Sum both scores for averaging
-          acc.naturalLightSum += analysis.naturalLightScore;
-          acc.modernScoreSum += analysis.modernScore;
-          acc.scoreCount++;
-          return acc;
-        }, {
-          naturalLightSum: 0,
-          modernScoreSum: 0,
-          scoreCount: 0
-        });
-
-        const finalScores = scores.scoreCount > 0 ? {
-          naturalLight: Math.round(scores.naturalLightSum / scores.scoreCount),
-          modern: Math.round(scores.modernScoreSum / scores.scoreCount)
-        } : {
-          naturalLight: 0,
-          modern: 0
-        };
-        
-        let excluded = false;
-        if (additionalPreferences.modernPreference && finalScores.modern < 7) {
-          excluded = true;
-        }
-        if (additionalPreferences.naturalLightPreference && finalScores.naturalLight < 7) {
-          excluded = true;
-        }
-        return !excluded;
+      // Search for listings with the updated criteria
+      const listingsResponse = await fetch('/api/listings/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedCriteria),
       });
 
-      // Create a more detailed results message
-      let resultMessage = '';
-      if (filteredListings.length > 0) {
-        const priceRange = filteredListings.reduce((acc, listing) => {
-          acc.min = Math.min(acc.min, listing.price);
-          acc.max = Math.max(acc.max, listing.price);
-          return acc;
-        }, { min: Infinity, max: -Infinity });
-
-        resultMessage = `I found ${filteredListings.length} apartments matching your criteria${
-          filteredListings.length > 1 
-            ? `, ranging from $${priceRange.min.toLocaleString()} to $${priceRange.max.toLocaleString()}`
-            : ` at $${priceRange.min.toLocaleString()}`
-        }. Let me know if you'd like to refine the search further or if you have any questions about specific listings!`;
-      } else {
-        resultMessage = "I couldn't find any apartments matching those exact criteria. Would you like to try with different neighborhoods or adjust your price range?";
+      if (!listingsResponse.ok) {
+        throw new Error('Failed to fetch listings');
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', content: resultMessage }]);
-      onResults(filteredListings);
+      const listingsData = await listingsResponse.json();
+      const { listings } = listingsData;
 
+      // Update query description for relevance sorting
+      if (data.queryDescription) {
+        setCurrentQueryDescription(data.queryDescription);
+        if (onQueryDescription) {
+          onQueryDescription(data.queryDescription);
+        }
+      }
+      onResults(listings);
+
+      setMessages([
+        ...messages,
+        { role: 'user', content: input },
+        { role: 'assistant', content: `I found ${listings.length} listings that match your criteria.` }
+      ]);
     } catch (error) {
       console.error('Search error:', error);
-      setMessages(prev => [
-        ...prev.filter(m => !m.isSearching),
-        { role: 'assistant', content: 'Sorry, I encountered an error while searching. Please try again.' }
+      setMessages([
+        ...messages,
+        { role: 'user', content: input },
+        { role: 'assistant', content: 'Sorry, there was an error processing your search.' }
       ]);
-    } finally {
-      setIsSearching(false);
     }
   };
 
@@ -169,13 +129,13 @@ export default function NaturalSearch({ onResults }: NaturalSearchProps) {
     e.preventDefault();
     if (!input.trim() || isSearching) return;
     
-    handleSearch(input);
-    setInput('');
+    handleSearch();
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-4 flex flex-col h-[600px]">
-      <div className="flex-1 overflow-y-auto mb-4 space-y-4">
+    <div className="w-full max-w-2xl mx-auto flex flex-col h-[600px] bg-white rounded-lg shadow-sm">
+      {/* Chat messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message, index) => (
           <div
             key={index}
@@ -201,23 +161,27 @@ export default function NaturalSearch({ onResults }: NaturalSearchProps) {
           </div>
         ))}
       </div>
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          className="flex-1 p-3 border rounded-lg"
-          placeholder="Tell me what you're looking for..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={isSearching}
-        />
-        <button
-          type="submit"
-          className="bg-blue-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50"
-          disabled={isSearching || !input.trim()}
-        >
-          Send
-        </button>
-      </form>
+
+      {/* Input form */}
+      <div className="p-4 border-t">
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            type="text"
+            className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Tell me what you're looking for..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={isSearching}
+          />
+          <button
+            type="submit"
+            className="bg-blue-500 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
+            disabled={isSearching || !input.trim()}
+          >
+            Send
+          </button>
+        </form>
+      </div>
     </div>
   );
 } 

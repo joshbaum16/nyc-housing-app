@@ -23,6 +23,7 @@ interface ProcessedPreferences {
     naturalLightPreference?: boolean;
     appliancePreference?: 'new' | 'any';
   };
+  queryDescription?: string;
 }
 
 // User-friendly neighborhood groups
@@ -79,7 +80,8 @@ export async function POST(request: Request) {
   try {
     const { query, conversationHistory } = await request.json();
 
-    const messages = [
+    // First, get search parameters
+    const searchMessages = [
       {
         role: 'system',
         content: `You are a helpful NYC apartment search assistant. Your goal is to help users find apartments by understanding their preferences and constraints.
@@ -123,19 +125,19 @@ When responding about neighborhoods, use the friendly names in your conversation
       { role: 'user', content: query }
     ];
 
-    const completion = await openai.chat.completions.create({
+    const searchCompletion = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages,
-      temperature: 0.1 // Add low temperature for more consistent JSON formatting
+      messages: searchMessages,
+      temperature: 0.1
     });
 
-    const response = completion.choices[0].message.content;
-    if (!response) {
+    const searchResponse = searchCompletion.choices[0].message.content;
+    if (!searchResponse) {
       throw new Error('No response from OpenAI');
     }
 
-    const rawPreferences = JSON.parse(response);
-    
+    const rawPreferences = JSON.parse(searchResponse);
+
     // Convert user-friendly areas to StreetEasy area codes
     if (rawPreferences.areas) {
       const userAreas = rawPreferences.areas.split(',').map((a: string) => a.trim());
@@ -143,7 +145,28 @@ When responding about neighborhoods, use the friendly names in your conversation
       rawPreferences.areas = streetEasyAreas.join(',');
     }
 
-    const processedPreferences = rawPreferences as ProcessedPreferences & {
+    // Get a natural language description of the search
+    const descriptionMessages = [
+      {
+        role: 'system',
+        content: 'You are a helpful assistant. Given a user\'s apartment search query, create a detailed but concise description of their ideal apartment. Focus on features, location, and preferences. Use natural language and be specific.'
+      },
+      ...conversationHistory,
+      { role: 'user', content: query }
+    ];
+
+    const descriptionCompletion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: descriptionMessages,
+      temperature: 0.7
+    });
+
+    const queryDescription = descriptionCompletion.choices[0].message.content;
+
+    const processedPreferences = {
+      ...rawPreferences,
+      queryDescription
+    } as ProcessedPreferences & {
       needsMoreInfo: boolean;
       followUpQuestion?: string;
     };

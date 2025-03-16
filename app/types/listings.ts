@@ -1,14 +1,14 @@
 import { ImageAnalysis } from '../services/vision';
 
 export interface SearchFilters {
-  minBedrooms: string;
+  minBedrooms?: string;
   maxBedrooms?: string;
   minBaths?: string;
   minPrice?: string;
-  maxPrice: string;
+  maxPrice?: string;
   neighborhoods: string[];
   amenities: string[];
-  petFriendly: boolean;
+  petFriendly?: boolean;
   noFee?: boolean;
 }
 
@@ -17,38 +17,39 @@ export interface DetailedListing {
   status: string;
   address: string;
   price: number;
-  borough: string;
-  neighborhood: string;
-  propertyType: string;
-  sqft: number;
+  borough?: string;
+  neighborhood?: string;
+  propertyType?: string;
+  sqft?: number;
   bedrooms: number;
   bathrooms: number;
-  amenities: string[];
-  description: string;
-  images: string[];
-  imageAnalysis?: { [key: string]: ImageAnalysis };
+  amenities: string | string[];
+  description?: string;
+  images: string | string[];
+  imageAnalysis?: string | { [key: string]: any };
   noFee: boolean;
-  agents: string[];
-  availableFrom: string;
-  daysOnMarket: number;
+  agents: string | any[];
+  availableFrom?: string;
+  daysOnMarket?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
+  longitude?: number;
+  latitude?: number;
+  url?: string;
 }
 
-export interface Listing {
-  id: string;
-  price: number;
-  status: string;
-  longitude: number;
-  latitude: number;
-  url: string;
+export interface Listing extends DetailedListing {
   details?: DetailedListing;
 }
 
 export interface SearchResponse {
+  listings: Listing[];
   pagination: {
     count: number;
-    nextOffset: number;
+    total?: number;
+    page?: number;
+    pages?: number;
   };
-  listings: Listing[];
 }
 
 export interface ProcessedPreferences {

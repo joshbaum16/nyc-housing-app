@@ -1,47 +1,75 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import NaturalSearch from './components/NaturalSearch';
 import ListingCard from './components/ListingCard';
 import { Listing } from './types/listings';
+import { sortListingsByRelevance } from './services/embeddings';
 
-type SortOption = 'none' | 'price-asc' | 'price-desc';
+type SortOption = 'none' | 'price-asc' | 'price-desc' | 'relevance';
 
 export default function Home() {
   const [searchResults, setSearchResults] = useState<Listing[]>([]);
+  const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [isClearing, setIsClearing] = useState(false);
-  const [sortBy, setSortBy] = useState<SortOption>('none');
+  const [currentQueryDescription, setCurrentQueryDescription] = useState<string>();
+  const [sortedListings, setSortedListings] = useState<Listing[]>([]);
 
   const clearCache = async () => {
+    setIsClearing(true);
     try {
-      setIsClearing(true);
-      const response = await fetch('/api/clear-cache', {
-        method: 'POST'
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to clear cache');
-      }
-
-      // Clear the current search results
+      await fetch('/api/clear-cache', { method: 'POST' });
       setSearchResults([]);
-      alert('Cache cleared successfully');
+      setSortedListings([]);
     } catch (error) {
-      console.error('Error clearing cache:', error);
-      alert('Failed to clear cache');
+      console.error('Failed to clear cache:', error);
     } finally {
       setIsClearing(false);
     }
   };
 
-  const sortedResults = [...searchResults].sort((a, b) => {
-    if (sortBy === 'price-asc') {
-      return a.price - b.price;
-    } else if (sortBy === 'price-desc') {
-      return b.price - a.price;
-    }
-    return 0;
-  });
+  const handleSearchResults = async (listings: Listing[]) => {
+    setSearchResults(listings);
+  };
+
+  const handleQueryDescription = (description: string) => {
+    setCurrentQueryDescription(description);
+  };
+
+  // Update sorted results whenever search results or sort option changes
+  useEffect(() => {
+    const updateSortedResults = async () => {
+      const results = [...searchResults];
+      
+      switch (sortBy) {
+        case 'price-asc':
+          setSortedListings([...results].sort((a, b) => a.price - b.price));
+          break;
+        case 'price-desc':
+          setSortedListings([...results].sort((a, b) => b.price - a.price));
+          break;
+        case 'relevance':
+          if (currentQueryDescription) {
+            console.log('Sorting by relevance with query:', currentQueryDescription);
+            try {
+              const relevanceSorted = await sortListingsByRelevance(results, currentQueryDescription);
+              setSortedListings(relevanceSorted);
+            } catch (error) {
+              console.error('Error sorting by relevance:', error);
+              setSortedListings(results);
+            }
+          } else {
+            console.log('No query description available for relevance sorting');
+            setSortedListings(results);
+          }
+          break;
+        default:
+          setSortedListings(results);
+      }
+    };
+
+    updateSortedResults();
+  }, [searchResults, sortBy, currentQueryDescription]);
 
   return (
     <main className="min-h-screen p-8">
@@ -59,7 +87,10 @@ export default function Home() {
         
         {/* Natural Language Search */}
         <div className="mb-12">
-          <NaturalSearch onResults={setSearchResults} />
+          <NaturalSearch 
+            onResults={handleSearchResults} 
+            onQueryDescription={handleQueryDescription}
+          />
         </div>
 
         {/* Results */}
@@ -79,23 +110,20 @@ export default function Home() {
                   onChange={(e) => setSortBy(e.target.value as SortOption)}
                   className="border rounded-lg px-3 py-2 text-sm bg-white"
                 >
-                  <option value="none">Default</option>
+                  <option value="relevance">Relevance</option>
                   <option value="price-asc">Price: Low to High</option>
                   <option value="price-desc">Price: High to Low</option>
+                  <option value="none">Default</option>
                 </select>
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {sortedResults.map((listing) => (
+              {sortedListings.map((listing: Listing) => (
                 <ListingCard key={listing.id} listing={listing} />
               ))}
             </div>
           </>
-        ) : (
-          <div className="text-center text-gray-500">
-            Describe your ideal apartment above and we'll find the best matches!
-          </div>
-        )}
+        ) : null}
       </div>
     </main>
   );

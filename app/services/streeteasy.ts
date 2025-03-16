@@ -8,13 +8,13 @@ import {
   StreetEasySearchParams
 } from '../types/listings';
 
-if (!process.env.NEXT_PUBLIC_STREETEASY_API_KEY) {
+if (!process.env.STREETEASY_API_KEY) {
   throw new Error('Missing STREETEASY_API_KEY environment variable');
 }
 
 const STREETEASY_API_CONFIG = {
   host: 'streeteasy-api.p.rapidapi.com',
-  key: process.env.NEXT_PUBLIC_STREETEASY_API_KEY,
+  key: process.env.STREETEASY_API_KEY,
   baseUrl: 'https://streeteasy-api.p.rapidapi.com'
 };
 
@@ -86,7 +86,7 @@ async function analyzeListingImages(images: string[]): Promise<{ [key: string]: 
 
 async function saveDetailedListingToDB(listing: DetailedListing): Promise<void> {
   try {
-    if (listing.images && (!listing.imageAnalysis || Object.keys(listing.imageAnalysis).length === 0)) {
+    if (listing.images && Array.isArray(listing.images) && (!listing.imageAnalysis || Object.keys(listing.imageAnalysis).length === 0)) {
       listing.imageAnalysis = await analyzeListingImages(listing.images);
     }
 
@@ -114,7 +114,7 @@ async function updateCachedListing(
     updatedListing.price = updates.newPrice;
   }
 
-  if (updates.needsImageAnalysis && updatedListing.images) {
+  if (updates.needsImageAnalysis && updatedListing.images && Array.isArray(updatedListing.images)) {
     console.log(`Adding missing image analysis for cached listing ${listing.id}`);
     updatedListing.imageAnalysis = await analyzeListingImages(updatedListing.images);
   }
@@ -163,15 +163,15 @@ function filterListingsByPreferences(listings: Listing[], filters: SearchFilters
 
     if (filters.amenities?.length > 0) {
       const hasAllAmenities = filters.amenities.every(amenity =>
-        listing.details!.amenities.some(a => a.toLowerCase().includes(amenity.toLowerCase()))
+        (Array.isArray(listing.details?.amenities) ? listing.details.amenities : [])
+          .some((a: string) => a.toLowerCase().includes(amenity.toLowerCase()))
       );
       if (!hasAllAmenities) return false;
     }
 
     if (filters.petFriendly) {
-      const isPetFriendly = listing.details!.amenities.some(amenity =>
-        amenity.toLowerCase().includes('pet friendly')
-      );
+      const isPetFriendly = (Array.isArray(listing.details?.amenities) ? listing.details.amenities : [])
+        .some((amenity: string) => amenity.toLowerCase().includes('pet friendly'));
       if (!isPetFriendly) return false;
     }
 
@@ -186,7 +186,7 @@ export async function getRentalById(id: string, currentPrice?: number): Promise<
     if (cachedListing) {
       const updates = {
         newPrice: currentPrice !== undefined && currentPrice !== cachedListing.price ? currentPrice : undefined,
-        needsImageAnalysis: cachedListing.images && (!cachedListing.imageAnalysis || Object.keys(cachedListing.imageAnalysis).length === 0)
+        needsImageAnalysis: !!(cachedListing.images && (!cachedListing.imageAnalysis || Object.keys(cachedListing.imageAnalysis).length === 0))
       };
 
       if (updates.newPrice !== undefined || updates.needsImageAnalysis) {
